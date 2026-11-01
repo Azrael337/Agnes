@@ -1,5 +1,7 @@
 #pragma once
+
 #include "backened.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -8,25 +10,35 @@
 #include <fstream>
 #include <string>
 #include <vector>
+
 #include <cstdlib>
 #ifdef _WIN32
-#include <malloc.h>
+  #include <malloc.h>
 #endif
-inline void* _q14o(size_t align, size_t size) {
+
+inline void* aligned_alloc_raw(size_t align, size_t size) {
 #ifdef _WIN32
-return _aligned_malloc(size, align);
+    return _aligned_malloc(size, align);
 #else
-return std::aligned_alloc(align, size);
+    return std::aligned_alloc(align, size);
 #endif
 }
-inline void _q14p(void* p) {
+
+inline void aligned_free_raw(void* p) {
 #ifdef _WIN32
-_aligned_free(p);
+    _aligned_free(p);
 #else
-std::free(p);
+    std::free(p);
 #endif
 }
+
 namespace nnue {
+
+//=========x=========x=========x=========x=========x=========x=========x=========
+//  Agnes NNUE — HalfKAv2_hm^ features, L1=512 L2=16 L3=32
+//  net file format matches the official nnue-pytorch trainer's serialize.py
+//  here know more: https://chessprogramming.org/NNUE
+//=========x=========x=========x=========x=========x=========x=========x=========
 #ifndef NNUE_ARCH_L1
 #define NNUE_ARCH_L1 512
 #endif
@@ -36,376 +48,451 @@ namespace nnue {
 #ifndef NNUE_ARCH_L3
 #define NNUE_ARCH_L3 32
 #endif
-constexpr int _q11o = NNUE_ARCH_L1;
-constexpr int _q11p = NNUE_ARCH_L2;
-constexpr int _q11q = NNUE_ARCH_L3;
-static_assert(_q11o % 2 == 0 && _q11p >= 2, "bad architecture");
-constexpr int _q12n = 8;
-constexpr int _q11s = 8;
-constexpr int _q12f = 64;
-constexpr int _q12d = 32;
-constexpr int _q12c = 11;
-constexpr int _q12o = _q12c * _q12f;
-constexpr int _q12e = _q12o * _q12d;
-constexpr uint32_t _q119 = 0x6A448AFAu;
-constexpr uint32_t _q10x = 0x7F234CB8u;
-constexpr int _q12i = 16;
-constexpr int _q146 = 6;
-constexpr int _q11a = 255;
-constexpr int _q11g = 128;
-constexpr int _q120 = 600;
-constexpr int _q11n[_q12f] = {
--1, -1, -1, -1, 31, 30, 29, 28,
--1, -1, -1, -1, 27, 26, 25, 24,
--1, -1, -1, -1, 23, 22, 21, 20,
--1, -1, -1, -1, 19, 18, 17, 16,
--1, -1, -1, -1, 15, 14, 13, 12,
--1, -1, -1, -1, 11, 10, 9, 8,
--1, -1, -1, -1, 7, 6, 5, 4,
--1, -1, -1, -1, 3, 2, 1, 0,
+constexpr int L1 = NNUE_ARCH_L1;
+constexpr int L2 = NNUE_ARCH_L2;
+constexpr int L3 = NNUE_ARCH_L3;
+static_assert(L1 % 2 == 0 && L2 >= 2, "bad architecture");
+constexpr int PSQT_BUCKETS = 8;
+constexpr int LS_BUCKETS   = 8;
+
+constexpr int NUM_SQ            = 64;
+constexpr int NUM_KING_BUCKETS  = 32;
+constexpr int NUM_EXPORT_PLANES = 11;
+constexpr int PS_NB             = NUM_EXPORT_PLANES * NUM_SQ;
+constexpr int NUM_REAL_FEATURES = PS_NB * NUM_KING_BUCKETS;
+
+constexpr uint32_t FILE_VERSION = 0x6A448AFAu;
+constexpr uint32_t FEATURE_HASH = 0x7F234CB8u;
+
+constexpr int OUTPUT_SCALE      = 16;
+constexpr int WEIGHT_SCALE_BITS = 6;
+constexpr int FT_MAX_VAL        = 255;
+constexpr int HIDDEN_ONE        = 128;
+constexpr int NNUE2SCORE        = 600;
+
+constexpr int KingBucketOriented[NUM_SQ] = {
+    -1, -1, -1, -1, 31, 30, 29, 28,
+    -1, -1, -1, -1, 27, 26, 25, 24,
+    -1, -1, -1, -1, 23, 22, 21, 20,
+    -1, -1, -1, -1, 19, 18, 17, 16,
+    -1, -1, -1, -1, 15, 14, 13, 12,
+    -1, -1, -1, -1, 11, 10,  9,  8,
+    -1, -1, -1, -1,  7,  6,  5,  4,
+    -1, -1, -1, -1,  3,  2,  1,  0,
 };
-namespace _q15g {
-inline bool _q17z(std::ifstream& f, void* dst, size_t n) {
-f.read(reinterpret_cast<char*>(dst), (std::streamsize)n);
-return (bool)f;
+
+
+// =====< Binary reading helpers >=====
+// little-endian file format
+// matches what NNUEWriter in nnue-pytorch spits out
+namespace detail {
+
+inline bool read_bytes(std::ifstream& f, void* dst, size_t n) {
+    f.read(reinterpret_cast<char*>(dst), (std::streamsize)n);
+    return (bool)f;
 }
-inline bool _q181(std::ifstream& f, uint32_t& out) {
-uint8_t b[4];
-if (!_q17z(f, b, 4)) return false;
-out = (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
-return true;
+
+inline bool read_u32(std::ifstream& f, uint32_t& out) {
+    uint8_t b[4];
+    if (!read_bytes(f, b, 4)) return false;
+    out = (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
+    return true;
 }
-inline bool _q17k(std::ifstream& f) {
-static constexpr char _q16z[] = "COMPRESSED_LEB128";
-constexpr size_t _q170 = sizeof(_q16z) - 1;
-std::streampos pos = f.tellg();
-char buf[_q170];
-f.read(buf, (std::streamsize)_q170);
-bool ok = (f.gcount() == (std::streamsize)_q170) && std::memcmp(buf, _q16z, _q170) == 0;
-f.clear();
-f.seekg(pos);
-return ok;
+
+inline bool peek_leb128_magic(std::ifstream& f) {
+    static constexpr char magic[] = "COMPRESSED_LEB128";
+    constexpr size_t magicLen = sizeof(magic) - 1;
+    std::streampos pos = f.tellg();
+    char buf[magicLen];
+    f.read(buf, (std::streamsize)magicLen);
+    bool ok = (f.gcount() == (std::streamsize)magicLen) && std::memcmp(buf, magic, magicLen) == 0;
+    f.clear();
+    f.seekg(pos);
+    return ok;
 }
-inline bool _q15f(const std::vector<uint8_t>& bytes, size_t count, std::vector<int64_t>& out) {
-out.resize(count);
-size_t pos = 0;
-for (size_t i = 0; i < count; ++i) {
-uint64_t result = 0;
-int shift = 0;
-uint8_t byte;
-do {
-if (pos >= bytes.size()) return false;
-byte = bytes[pos++];
-result |= (uint64_t)(byte & 0x7F) << shift;
-shift += 7;
-} while (byte & 0x80);
-int64_t v = (int64_t)result;
-if (shift < 64 && (byte & 0x40)) v |= -((int64_t)1 << shift);
-out[i] = v;
+
+inline bool decode_leb128(const std::vector<uint8_t>& bytes, size_t count, std::vector<int64_t>& out) {
+    out.resize(count);
+    size_t pos = 0;
+    for (size_t i = 0; i < count; ++i) {
+        uint64_t result = 0;
+        int shift = 0;
+        uint8_t byte;
+        do {
+            if (pos >= bytes.size()) return false;
+            byte = bytes[pos++];
+            result |= (uint64_t)(byte & 0x7F) << shift;
+            shift += 7;
+        } while (byte & 0x80);
+        int64_t v = (int64_t)result;
+        if (shift < 64 && (byte & 0x40)) v |= -((int64_t)1 << shift);
+        out[i] = v;
+    }
+    return true;
 }
-return true;
-}
+
 template <typename T>
-inline bool _q180(std::ifstream& f, std::vector<T>& out, size_t count, int width) {
-out.resize(count);
-if (_q17k(f)) {
-char _q16z[17];
-if (!_q17z(f, _q16z, 17)) return false;
-uint32_t byteLen;
-if (!_q181(f, byteLen)) return false;
-std::vector<uint8_t> buf(byteLen);
-if (byteLen && !_q17z(f, buf.data(), byteLen)) return false;
-std::vector<int64_t> decoded;
-if (!_q15f(buf, count, decoded)) return false;
-for (size_t i = 0; i < count; ++i) out[i] = (T)decoded[i];
-return true;
-} else {
-for (size_t i = 0; i < count; ++i) {
-if (width == 1) {
-int8_t v;
-if (!_q17z(f, &v, 1)) return false;
-out[i] = (T)v;
-} else if (width == 2) {
-uint8_t b[2];
-if (!_q17z(f, b, 2)) return false;
-int16_t v = (int16_t)((uint16_t)b[0] | ((uint16_t)b[1] << 8));
-out[i] = (T)v;
-} else {
-uint8_t b[4];
-if (!_q17z(f, b, 4)) return false;
-int32_t v = (int32_t)((uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) |
-((uint32_t)b[3] << 24));
-out[i] = (T)v;
+inline bool read_tensor(std::ifstream& f, std::vector<T>& out, size_t count, int width) {
+    out.resize(count);
+    if (peek_leb128_magic(f)) {
+        char magic[17];
+        if (!read_bytes(f, magic, 17)) return false;
+        uint32_t byteLen;
+        if (!read_u32(f, byteLen)) return false;
+        std::vector<uint8_t> buf(byteLen);
+        if (byteLen && !read_bytes(f, buf.data(), byteLen)) return false;
+        std::vector<int64_t> decoded;
+        if (!decode_leb128(buf, count, decoded)) return false;
+        for (size_t i = 0; i < count; ++i) out[i] = (T)decoded[i];
+        return true;
+    } else {
+        for (size_t i = 0; i < count; ++i) {
+            if (width == 1) {
+                int8_t v;
+                if (!read_bytes(f, &v, 1)) return false;
+                out[i] = (T)v;
+            } else if (width == 2) {
+                uint8_t b[2];
+                if (!read_bytes(f, b, 2)) return false;
+                int16_t v = (int16_t)((uint16_t)b[0] | ((uint16_t)b[1] << 8));
+                out[i] = (T)v;
+            } else {
+                uint8_t b[4];
+                if (!read_bytes(f, b, 4)) return false;
+                int32_t v = (int32_t)((uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) |
+                                       ((uint32_t)b[3] << 24));
+                out[i] = (T)v;
+            }
+        }
+        return true;
+    }
 }
+
 }
-return true;
-}
-}
-}
-struct _q12q {
-alignas(32) std::array<int16_t, _q11o> acc{};
-std::array<int32_t, _q12n> psqt{};
+
+
+// =====< Incremental accumulator (both perspectives) >=====
+// refreshed once at the root, updated incrementally as moves get made
+struct PerspectiveAccumulator {
+    alignas(32) std::array<int16_t, L1> acc{};
+    std::array<int32_t, PSQT_BUCKETS> psqt{};
 };
-struct _q100 {
-_q12q side[2];
+
+struct Accumulator {
+    PerspectiveAccumulator side[2];
 };
-struct _q10w {
-int in_features = 0;
-int out_features = 0;
-int padded_in = 0;
-std::vector<int32_t> bias;
-std::vector<int8_t> weight;
-bool load(std::ifstream& f, int inF, int outF) {
-in_features = inF;
-out_features = outF;
-padded_in = ((inF + 31) / 32) * 32;
-bias.resize(out_features);
-for (int i = 0; i < out_features; ++i) {
-uint8_t b[4];
-if (!_q15g::_q17z(f, b, 4)) return false;
-bias[i] = (int32_t)((uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) |
-((uint32_t)b[3] << 24));
-}
-weight.resize((size_t)out_features * padded_in);
-for (size_t i = 0; i < weight.size(); ++i) {
-int8_t v;
-if (!_q15g::_q17z(f, &v, 1)) return false;
-weight[i] = v;
-}
-return true;
-}
+
+
+// =====< Quantized FC layer >=====
+// int8 weights, int32 bias. stored per layer-stack bucket
+struct FCLayer {
+    int in_features = 0;
+    int out_features = 0;
+    int padded_in = 0;
+    std::vector<int32_t> bias;
+    std::vector<int8_t> weight;
+
+    bool load(std::ifstream& f, int inF, int outF) {
+        in_features = inF;
+        out_features = outF;
+        padded_in = ((inF + 31) / 32) * 32;
+        bias.resize(out_features);
+        for (int i = 0; i < out_features; ++i) {
+            uint8_t b[4];
+            if (!detail::read_bytes(f, b, 4)) return false;
+            bias[i] = (int32_t)((uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) |
+                                 ((uint32_t)b[3] << 24));
+        }
+        weight.resize((size_t)out_features * padded_in);
+        for (size_t i = 0; i < weight.size(); ++i) {
+            int8_t v;
+            if (!detail::read_bytes(f, &v, 1)) return false;
+            weight[i] = v;
+        }
+        return true;
+    }
 };
-struct _q12g {
-std::vector<int16_t> ftBias;
-std::vector<int16_t> ftWeight;
-std::vector<int32_t> ftPsqtWeight;
-_q10w l1[_q11s];
-_q10w l2[_q11s];
-_q10w l3[_q11s];
-bool loaded = false;
-static uint32_t _q15c() {
-uint32_t prev = 0xEC42E90Du ^ (uint32_t)(_q11o * 2);
-const int outs[3] = {_q11p, _q11q, 1};
-uint32_t h = 0;
-for (int li = 0; li < 3; ++li) {
-h = 0xCC03DAE4u + (uint32_t)outs[li];
-h ^= (prev >> 1);
-h ^= (uint32_t)(prev << 31);
-if (outs[li] != 1) h += 0x538D24C7u;
-prev = h;
-}
-return h;
-}
-std::string lastError;
-bool load(const std::string& path) {
-loaded = false;
-lastError.clear();
-std::ifstream f(path, std::ios::binary);
-if (!f) { lastError = "cannot open file"; return false; }
-const uint32_t fcHash = _q15c();
-uint32_t version;
-if (!_q15g::_q181(f, version)) { lastError = "file too short"; return false; }
-if (version != _q119) { lastError = "unsupported file version (not an nnue-pytorch export)"; return false; }
-uint32_t headerHash;
-if (!_q15g::_q181(f, headerHash)) { lastError = "file too short"; return false; }
-if (headerHash != (fcHash ^ _q10x ^ (uint32_t)(_q11o * 2))) {
-lastError = "architecture hash mismatch (net must be HalfKAv2_hm^ with the l1/l2/l3 this binary was built for)";
-return false;
-}
-uint32_t descLen;
-if (!_q15g::_q181(f, descLen)) { lastError = "file too short"; return false; }
-f.seekg(descLen, std::ios::cur);
-if (!f) { lastError = "file too short"; return false; }
-uint32_t ftHash;
-if (!_q15g::_q181(f, ftHash)) { lastError = "file too short"; return false; }
-if (ftHash != (_q10x ^ (uint32_t)(_q11o * 2))) { lastError = "feature transformer hash mismatch"; return false; }
-if (!_q15g::_q180(f, ftBias, (size_t)_q11o, 2) ||
-!_q15g::_q180(f, ftWeight, (size_t)_q12e * _q11o, 2) ||
-!_q15g::_q180(f, ftPsqtWeight, (size_t)_q12e * _q12n, 4)) {
-lastError = "truncated or corrupt feature transformer";
-return false;
-}
-for (int b = 0; b < _q11s; ++b) {
-uint32_t bucketHash;
-if (!_q15g::_q181(f, bucketHash) || bucketHash != fcHash ||
-!l1[b].load(f, _q11o, _q11p) || !l2[b].load(f, 2 * _q11p, _q11q) ||
-!l3[b].load(f, 2 * _q11p + 2 * _q11q, 1)) {
-lastError = "truncated or corrupt layer stack";
-return false;
-}
-}
-loaded = true;
-return true;
-}
-static inline int _q15p(_q156::_q10k perspective, _q156::_q13n ksq, _q156::_q12t pt,
-_q156::_q10k _q15b, _q156::_q13n sq) {
-const bool whitePov = (perspective == _q156::_q10k::_q148);
-const int kfile = ksq.index() & 7;
-const int flip = (kfile < 4 ? 7 : 0) ^ (whitePov ? 0 : 56);
-const int oksq = ksq.index() ^ flip;
-const int bucket = _q11n[oksq];
-const int plane =
-(pt == _q156::_q12t::_q11k) ? 10 : ((int)pt) * 2 + ((_q15b != perspective) ? 1 : 0);
-const int osq = sq.index() ^ flip;
-return bucket * _q12o + plane * _q12f + osq;
-}
-inline void _q18p(_q100& acc, _q156::_q10k perspective, _q156::_q13n ksq,
-_q156::_q12t pt, _q156::_q10k _q15b, _q156::_q13n sq, bool add) const {
-const int row = _q15p(perspective, ksq, pt, _q15b, sq);
-_q12q& pa = acc.side[(int)perspective];
-const int16_t* wrow = &ftWeight[(size_t)row * _q11o];
-const int32_t* prow = &ftPsqtWeight[(size_t)row * _q12n];
-if (add) {
-for (int i = 0; i < _q11o; ++i) pa.acc[i] = (int16_t)(pa.acc[i] + wrow[i]);
-for (int i = 0; i < _q12n; ++i) pa.psqt[i] += prow[i];
-} else {
-for (int i = 0; i < _q11o; ++i) pa.acc[i] = (int16_t)(pa.acc[i] - wrow[i]);
-for (int i = 0; i < _q12n; ++i) pa.psqt[i] -= prow[i];
-}
-}
-void _q185(_q156::_q10k perspective, const _q156::_q10c& board, _q100& acc) const {
-using namespace _q156;
-_q12q& pa = acc.side[(int)perspective];
-for (int i = 0; i < _q11o; ++i) pa.acc[i] = ftBias[i];
-pa.psqt.fill(0);
-const _q13n ksq = board._q16r(perspective);
-_q10b _q17c = board._q17c();
-while (_q17c) {
-_q13n sq = _q13n(_q17c.pop());
-_q12s p = board.at(sq);
-if (p == _q12s::_q121) continue;
-_q18p(acc, perspective, ksq, p.type(), p._q15b(), sq, true);
-}
-}
-void _q183(const _q156::_q10c& board, _q100& acc) const {
-_q185(_q156::_q10k::_q148, board, acc);
-_q185(_q156::_q10k::_q103, board, acc);
-}
-void _q186(_q156::_q10k perspective, const _q156::_q10c& board,
-const _q156::_q11w& move, _q100& acc) const {
-using namespace _q156;
-_q12q& pa = acc.side[(int)perspective];
-for (int i = 0; i < _q11o; ++i) pa.acc[i] = ftBias[i];
-pa.psqt.fill(0);
-const _q13n newKsq = move.to();
-const _q13n fromSq = move.from();
-const _q13n toSq = move.to();
-_q10b _q17c = board._q17c();
-while (_q17c) {
-_q13n sq = _q13n(_q17c.pop());
-if (sq == toSq) continue;
-_q12s p = board.at(sq);
-if (p == _q12s::_q121) continue;
-_q13n actualSq = (sq == fromSq) ? newKsq : sq;
-_q18p(acc, perspective, newKsq, p.type(), p._q15b(), actualSq, true);
-}
-}
-void _q18x(_q100& acc, const _q156::_q10c& board, const _q156::_q11w& move) const {
-using namespace _q156;
-assert(move._q18q() != _q11w::_q10f);
-_q13n from = move.from(), to = move.to();
-_q12s moved = board.at(from);
-if (moved == _q12s::_q121) return;
-const bool isEP = (move._q18q() == _q11w::_q10v);
-const bool hasNormalCapture = !isEP && board.at(to) != _q12s::_q121;
-_q12s normalCaptured = hasNormalCapture ? board.at(to) : _q12s::_q121;
-const _q12t destPT =
-(move._q18q() == _q11w::_q12m) ? move._q17w() : moved.type();
-for (int side = 0; side < 2; ++side) {
-_q10k persp = _q10k(side);
-if (moved.type() == _q12t::_q11k && moved._q15b() == persp) {
-_q186(persp, board, move, acc);
-continue;
-}
-const _q13n ksq = board._q16r(persp);
-_q18p(acc, persp, ksq, moved.type(), moved._q15b(), from, false);
-if (isEP) {
-_q13n epCapSq = _q13n(to.index() + ((moved._q15b() == _q10k::_q148) ? -8 : 8));
-_q18p(acc, persp, ksq, _q12t::_q12j, ~moved._q15b(), epCapSq, false);
-} else if (hasNormalCapture) {
-_q18p(acc, persp, ksq, normalCaptured.type(), normalCaptured._q15b(), to, false);
-}
-_q18p(acc, persp, ksq, destPT, moved._q15b(), to, true);
-}
-}
-void update_for_null_move(_q100& acc, const _q156::_q10c& board) const {
-(void)acc;
-(void)board;
-}
-void _q15n(const _q100& acc, _q156::_q10k stm, int pieceCount, int& psqtOut, int& positionalOut) const {
-int bucket = (pieceCount - 1) / 4;
-if (bucket < 0) bucket = 0;
-if (bucket >= _q11s) bucket = _q11s - 1;
-const _q156::_q10k persp0 = stm;
-const _q156::_q10k persp1 = ~stm;
-std::array<uint8_t, _q11o> ftOut{};
-constexpr int _q160 = _q11o / 2;
-for (int p = 0; p < 2; ++p) {
-const auto& a = acc.side[(int)(p == 0 ? persp0 : persp1)].acc;
-const int offset = _q160 * p;
-for (int i = 0; i < _q160; ++i) {
-int32_t v0 = std::clamp<int32_t>(a[i], 0, _q11a);
-int32_t v1 = std::clamp<int32_t>(a[i + _q160], 0, _q11a);
-ftOut[offset + i] = (uint8_t)std::min(127, (v0 * v1) >> 9);
-}
-}
-int32_t psqt =
-(acc.side[(int)persp0].psqt[bucket] - acc.side[(int)persp1].psqt[bucket]) / 2;
-const _q10w& fc0 = l1[bucket];
-int32_t fc0_out[_q11p];
-for (int j = 0; j < _q11p; ++j) {
-int32_t s = fc0.bias[j];
-const int8_t* w = &fc0.weight[(size_t)j * fc0.padded_in];
-for (int i = 0; i < _q11o; ++i) s += (int32_t)w[i] * (int32_t)ftOut[i];
-fc0_out[j] = s;
-}
-constexpr int _q14g = _q146 + 1;
-uint8_t concat1[2 * _q11p];
-for (int j = 0; j < _q11p; ++j) {
-int64_t sq = (int64_t)fc0_out[j] * (int64_t)fc0_out[j];
-concat1[j] = (uint8_t)std::min<int64_t>(127, sq >> (2 * _q14g + 7));
-concat1[_q11p + j] = (uint8_t)std::clamp(fc0_out[j] >> _q14g, 0, 127);
-}
-const _q10w& fc1 = l2[bucket];
-int32_t fc1_out[_q11q];
-for (int k = 0; k < _q11q; ++k) {
-int32_t s = fc1.bias[k];
-const int8_t* w = &fc1.weight[(size_t)k * fc1.padded_in];
-for (int i = 0; i < 2 * _q11p; ++i) s += (int32_t)w[i] * (int32_t)concat1[i];
-fc1_out[k] = s;
-}
-constexpr int _q14h = _q146;
-uint8_t concatFinal[2 * _q11p + 2 * _q11q];
-std::memcpy(concatFinal, concat1, sizeof(concat1));
-for (int k = 0; k < _q11q; ++k) {
-int64_t sq = (int64_t)fc1_out[k] * (int64_t)fc1_out[k];
-concatFinal[2 * _q11p + k] = (uint8_t)std::min<int64_t>(127, sq >> (2 * _q14h + 7));
-concatFinal[2 * _q11p + _q11q + k] = (uint8_t)std::clamp(fc1_out[k] >> _q14h, 0, 127);
-}
-const _q10w& fc2 = l3[bucket];
-int32_t fwdOut = fc2.bias[0];
-{
-const int8_t* w = &fc2.weight[0];
-const int n = 2 * _q11p + 2 * _q11q;
-for (int i = 0; i < n; ++i) fwdOut += (int32_t)w[i] * (int32_t)concatFinal[i];
-}
-static_assert(_q11p >= 2, "L2 must be at least 2 for the skip connection");
-fwdOut += fc0_out[_q11p - 2] - fc0_out[_q11p - 1];
-constexpr int64_t _q179 = (int64_t)_q120 * _q12i;
-constexpr int64_t denominator = (int64_t)_q11g * (1 << _q146) * 2;
-int32_t positional = (int32_t)(((int64_t)fwdOut * _q179) / denominator);
-psqtOut = psqt / _q12i;
-positionalOut = positional / _q12i;
-}
-int evaluate_from_accumulator(const _q100& acc, _q156::_q10k stm, int pieceCount) const {
-int p, q;
-_q15n(acc, stm, pieceCount, p, q);
-return p + q;
-}
-int _q15o(const _q156::_q10c& board) const {
-_q100 acc;
-_q183(board, acc);
-return evaluate_from_accumulator(acc, board._q18j(), board._q17c().count());
-}
+
+
+// =====< The network >=====
+// holds the feature transformer + the L1/L2/L3 layer stacks.
+// everything is loaded lazily on first isready/ucinewgame
+struct Network {
+    std::vector<int16_t> ftBias;
+    std::vector<int16_t> ftWeight;
+    std::vector<int32_t> ftPsqtWeight;
+
+    FCLayer l1[LS_BUCKETS];
+    FCLayer l2[LS_BUCKETS];
+    FCLayer l3[LS_BUCKETS];
+
+    bool loaded = false;
+
+    static uint32_t compute_fc_hash() {
+        uint32_t prev = 0xEC42E90Du ^ (uint32_t)(L1 * 2);
+        const int outs[3] = {L2, L3, 1};
+        uint32_t h = 0;
+        for (int li = 0; li < 3; ++li) {
+            h = 0xCC03DAE4u + (uint32_t)outs[li];
+            h ^= (prev >> 1);
+            h ^= (uint32_t)(prev << 31);
+            if (outs[li] != 1) h += 0x538D24C7u;
+            prev = h;
+        }
+        return h;
+    }
+
+    std::string lastError;
+
+    bool load(const std::string& path) {
+        loaded = false;
+        lastError.clear();
+        std::ifstream f(path, std::ios::binary);
+        if (!f) { lastError = "cannot open file"; return false; }
+
+        const uint32_t fcHash = compute_fc_hash();
+
+        uint32_t version;
+        if (!detail::read_u32(f, version)) { lastError = "file too short"; return false; }
+        if (version != FILE_VERSION) { lastError = "unsupported file version (not an nnue-pytorch export)"; return false; }
+
+        uint32_t headerHash;
+        if (!detail::read_u32(f, headerHash)) { lastError = "file too short"; return false; }
+        if (headerHash != (fcHash ^ FEATURE_HASH ^ (uint32_t)(L1 * 2))) {
+            lastError = "architecture hash mismatch (net must be HalfKAv2_hm^ with the l1/l2/l3 this binary was built for)";
+            return false;
+        }
+
+        uint32_t descLen;
+        if (!detail::read_u32(f, descLen)) { lastError = "file too short"; return false; }
+        f.seekg(descLen, std::ios::cur);
+        if (!f) { lastError = "file too short"; return false; }
+
+        uint32_t ftHash;
+        if (!detail::read_u32(f, ftHash)) { lastError = "file too short"; return false; }
+        if (ftHash != (FEATURE_HASH ^ (uint32_t)(L1 * 2))) { lastError = "feature transformer hash mismatch"; return false; }
+
+        if (!detail::read_tensor(f, ftBias, (size_t)L1, 2) ||
+            !detail::read_tensor(f, ftWeight, (size_t)NUM_REAL_FEATURES * L1, 2) ||
+            !detail::read_tensor(f, ftPsqtWeight, (size_t)NUM_REAL_FEATURES * PSQT_BUCKETS, 4)) {
+            lastError = "truncated or corrupt feature transformer";
+            return false;
+        }
+
+        for (int b = 0; b < LS_BUCKETS; ++b) {
+            uint32_t bucketHash;
+            if (!detail::read_u32(f, bucketHash) || bucketHash != fcHash ||
+                !l1[b].load(f, L1, L2) || !l2[b].load(f, 2 * L2, L3) ||
+                !l3[b].load(f, 2 * L2 + 2 * L3, 1)) {
+                lastError = "truncated or corrupt layer stack";
+                return false;
+            }
+        }
+
+        loaded = true;
+        return true;
+    }
+
+    static inline int feature_row(chess::Color perspective, chess::Square ksq, chess::PieceType pt,
+                                   chess::Color color, chess::Square sq) {
+        const bool whitePov = (perspective == chess::Color::WHITE);
+        const int kfile = ksq.index() & 7;
+        const int flip = (kfile < 4 ? 7 : 0) ^ (whitePov ? 0 : 56);
+        const int oksq = ksq.index() ^ flip;
+        const int bucket = KingBucketOriented[oksq];
+        const int plane =
+            (pt == chess::PieceType::KING) ? 10 : ((int)pt) * 2 + ((color != perspective) ? 1 : 0);
+        const int osq = sq.index() ^ flip;
+        return bucket * PS_NB + plane * NUM_SQ + osq;
+    }
+
+    inline void toggle(Accumulator& acc, chess::Color perspective, chess::Square ksq,
+                        chess::PieceType pt, chess::Color color, chess::Square sq, bool add) const {
+        const int row = feature_row(perspective, ksq, pt, color, sq);
+        PerspectiveAccumulator& pa = acc.side[(int)perspective];
+        const int16_t* wrow = &ftWeight[(size_t)row * L1];
+        const int32_t* prow = &ftPsqtWeight[(size_t)row * PSQT_BUCKETS];
+        if (add) {
+            for (int i = 0; i < L1; ++i) pa.acc[i] = (int16_t)(pa.acc[i] + wrow[i]);
+            for (int i = 0; i < PSQT_BUCKETS; ++i) pa.psqt[i] += prow[i];
+        } else {
+            for (int i = 0; i < L1; ++i) pa.acc[i] = (int16_t)(pa.acc[i] - wrow[i]);
+            for (int i = 0; i < PSQT_BUCKETS; ++i) pa.psqt[i] -= prow[i];
+        }
+    }
+
+    void refresh_perspective(chess::Color perspective, const chess::Board& board, Accumulator& acc) const {
+        using namespace chess;
+        PerspectiveAccumulator& pa = acc.side[(int)perspective];
+        for (int i = 0; i < L1; ++i) pa.acc[i] = ftBias[i];
+        pa.psqt.fill(0);
+
+        const Square ksq = board.kingSq(perspective);
+        Bitboard occ = board.occ();
+        while (occ) {
+            Square sq = Square(occ.pop());
+            Piece p = board.at(sq);
+            if (p == Piece::NONE) continue;
+            toggle(acc, perspective, ksq, p.type(), p.color(), sq, true);
+        }
+    }
+
+    void refresh(const chess::Board& board, Accumulator& acc) const {
+        refresh_perspective(chess::Color::WHITE, board, acc);
+        refresh_perspective(chess::Color::BLACK, board, acc);
+    }
+
+    void refresh_perspective_after_king_move(chess::Color perspective, const chess::Board& board,
+                                              const chess::Move& move, Accumulator& acc) const {
+        using namespace chess;
+        PerspectiveAccumulator& pa = acc.side[(int)perspective];
+        for (int i = 0; i < L1; ++i) pa.acc[i] = ftBias[i];
+        pa.psqt.fill(0);
+
+        const Square newKsq = move.to();
+        const Square fromSq = move.from();
+        const Square toSq = move.to();
+
+        Bitboard occ = board.occ();
+        while (occ) {
+            Square sq = Square(occ.pop());
+            if (sq == toSq) continue;
+            Piece p = board.at(sq);
+            if (p == Piece::NONE) continue;
+            Square actualSq = (sq == fromSq) ? newKsq : sq;
+            toggle(acc, perspective, newKsq, p.type(), p.color(), actualSq, true);
+        }
+    }
+
+    void update_for_move(Accumulator& acc, const chess::Board& board, const chess::Move& move) const {
+        using namespace chess;
+        assert(move.typeOf() != Move::CASTLING);
+
+        Square from = move.from(), to = move.to();
+        Piece moved = board.at(from);
+        if (moved == Piece::NONE) return;
+
+        const bool isEP = (move.typeOf() == Move::ENPASSANT);
+        const bool hasNormalCapture = !isEP && board.at(to) != Piece::NONE;
+        Piece normalCaptured = hasNormalCapture ? board.at(to) : Piece::NONE;
+        const PieceType destPT =
+            (move.typeOf() == Move::PROMOTION) ? move.promotionType() : moved.type();
+
+        for (int side = 0; side < 2; ++side) {
+            Color persp = Color(side);
+
+            if (moved.type() == PieceType::KING && moved.color() == persp) {
+                refresh_perspective_after_king_move(persp, board, move, acc);
+                continue;
+            }
+
+            const Square ksq = board.kingSq(persp);
+            toggle(acc, persp, ksq, moved.type(), moved.color(), from, false);
+            if (isEP) {
+                Square epCapSq = Square(to.index() + ((moved.color() == Color::WHITE) ? -8 : 8));
+                toggle(acc, persp, ksq, PieceType::PAWN, ~moved.color(), epCapSq, false);
+            } else if (hasNormalCapture) {
+                toggle(acc, persp, ksq, normalCaptured.type(), normalCaptured.color(), to, false);
+            }
+            toggle(acc, persp, ksq, destPT, moved.color(), to, true);
+        }
+    }
+
+    void update_for_null_move(Accumulator& acc, const chess::Board& board) const {
+        (void)acc;
+        (void)board;
+    }
+
+    void eval_parts(const Accumulator& acc, chess::Color stm, int pieceCount, int& psqtOut, int& positionalOut) const {
+        int bucket = (pieceCount - 1) / 4;
+        if (bucket < 0) bucket = 0;
+        if (bucket >= LS_BUCKETS) bucket = LS_BUCKETS - 1;
+
+        const chess::Color persp0 = stm;
+        const chess::Color persp1 = ~stm;
+
+        std::array<uint8_t, L1> ftOut{};
+        constexpr int half = L1 / 2;
+        for (int p = 0; p < 2; ++p) {
+            const auto& a = acc.side[(int)(p == 0 ? persp0 : persp1)].acc;
+            const int offset = half * p;
+            for (int i = 0; i < half; ++i) {
+                int32_t v0 = std::clamp<int32_t>(a[i], 0, FT_MAX_VAL);
+                int32_t v1 = std::clamp<int32_t>(a[i + half], 0, FT_MAX_VAL);
+                ftOut[offset + i] = (uint8_t)std::min(127, (v0 * v1) >> 9);
+            }
+        }
+
+        int32_t psqt =
+            (acc.side[(int)persp0].psqt[bucket] - acc.side[(int)persp1].psqt[bucket]) / 2;
+
+        const FCLayer& fc0 = l1[bucket];
+        int32_t fc0_out[L2];
+        for (int j = 0; j < L2; ++j) {
+            int32_t s = fc0.bias[j];
+            const int8_t* w = &fc0.weight[(size_t)j * fc0.padded_in];
+            for (int i = 0; i < L1; ++i) s += (int32_t)w[i] * (int32_t)ftOut[i];
+            fc0_out[j] = s;
+        }
+
+        constexpr int WSB0 = WEIGHT_SCALE_BITS + 1;
+        uint8_t concat1[2 * L2];
+        for (int j = 0; j < L2; ++j) {
+            int64_t sq = (int64_t)fc0_out[j] * (int64_t)fc0_out[j];
+            concat1[j] = (uint8_t)std::min<int64_t>(127, sq >> (2 * WSB0 + 7));
+            concat1[L2 + j] = (uint8_t)std::clamp(fc0_out[j] >> WSB0, 0, 127);
+        }
+
+        const FCLayer& fc1 = l2[bucket];
+        int32_t fc1_out[L3];
+        for (int k = 0; k < L3; ++k) {
+            int32_t s = fc1.bias[k];
+            const int8_t* w = &fc1.weight[(size_t)k * fc1.padded_in];
+            for (int i = 0; i < 2 * L2; ++i) s += (int32_t)w[i] * (int32_t)concat1[i];
+            fc1_out[k] = s;
+        }
+
+        constexpr int WSB1 = WEIGHT_SCALE_BITS;
+        uint8_t concatFinal[2 * L2 + 2 * L3];
+        std::memcpy(concatFinal, concat1, sizeof(concat1));
+        for (int k = 0; k < L3; ++k) {
+            int64_t sq = (int64_t)fc1_out[k] * (int64_t)fc1_out[k];
+            concatFinal[2 * L2 + k] = (uint8_t)std::min<int64_t>(127, sq >> (2 * WSB1 + 7));
+            concatFinal[2 * L2 + L3 + k] = (uint8_t)std::clamp(fc1_out[k] >> WSB1, 0, 127);
+        }
+
+        const FCLayer& fc2 = l3[bucket];
+        int32_t fwdOut = fc2.bias[0];
+        {
+            const int8_t* w = &fc2.weight[0];
+            const int n = 2 * L2 + 2 * L3;
+            for (int i = 0; i < n; ++i) fwdOut += (int32_t)w[i] * (int32_t)concatFinal[i];
+        }
+
+        static_assert(L2 >= 2, "L2 must be at least 2 for the skip connection");
+        fwdOut += fc0_out[L2 - 2] - fc0_out[L2 - 1];
+
+        constexpr int64_t multiplier = (int64_t)NNUE2SCORE * OUTPUT_SCALE;
+        constexpr int64_t denominator = (int64_t)HIDDEN_ONE * (1 << WEIGHT_SCALE_BITS) * 2;
+        int32_t positional = (int32_t)(((int64_t)fwdOut * multiplier) / denominator);
+
+        psqtOut = psqt / OUTPUT_SCALE;
+        positionalOut = positional / OUTPUT_SCALE;
+    }
+
+    int evaluate_from_accumulator(const Accumulator& acc, chess::Color stm, int pieceCount) const {
+        int p, q;
+        eval_parts(acc, stm, pieceCount, p, q);
+        return p + q;
+    }
+
+    int evaluate(const chess::Board& board) const {
+        Accumulator acc;
+        refresh(board, acc);
+        return evaluate_from_accumulator(acc, board.sideToMove(), board.occ().count());
+    }
 };
+
 }
+
+// have you seen agnes.cpp? go check it out if you haven't
