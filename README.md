@@ -104,5 +104,6 @@ Release 2.0* can be 3400 elo
 
 See [LICENSE](LICENSE).
 
-## ???
-Apologies for the unreadable code but this is the way I code
+## Acknowledgement
+* Agnes has been inspired from many strong chess engines like stockfish, reckless, koivisto, patricia, and caissa.
+* Agnes uses https://github.com/syzygy1/tb for syzygy tablebase
