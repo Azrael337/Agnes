@@ -1,7 +1,7 @@
 # Agnes Chess Engine
 
 <div align="center">
-  <img src="logo.jpg" alt="Agnes chess engine" width="300">
+  <img src="logo.jpg" alt="Agnes chess engine" width="450">
 
   ![License](https://img.shields.io/badge/License-GPL_3.0-green?style=for-the-badge)
   ![C++](https://img.shields.io/badge/C++-17-purple?style=for-the-badge)
@@ -13,6 +13,8 @@
 **A simple strong chess engine in C++ using a compact nnue and an efficient search**
 <br>
 Based on the character Agnes tachyon
+<br>
+<br> **⚠️ No guinea pigs were harmed during the making of this chess engine ⚠️**
 
 </div>
 
