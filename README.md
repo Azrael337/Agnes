@@ -1,7 +1,7 @@
 # Agnes Chess Engine
 
 <div align="center">
-  <img src="logo.jpg" alt="Agnes chess engine" width="450">
+  <img src="logo.jpg" alt="Agnes chess engine" width="400">
 
   ![License](https://img.shields.io/badge/License-GPL_3.0-green?style=for-the-badge)
   ![C++](https://img.shields.io/badge/C++-17-purple?style=for-the-badge)
