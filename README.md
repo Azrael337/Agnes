@@ -1,7 +1,7 @@
 # Agnes Chess Engine
 
 <div align="center">
-  <img src="logo.jpg" alt="Agnes chess engine" width="400">
+  <img src="logo.jpg" alt="Agnes chess engine" width="300">
 
   ![License](https://img.shields.io/badge/License-GPL_3.0-green?style=for-the-badge)
   ![C++](https://img.shields.io/badge/C++-17-purple?style=for-the-badge)
@@ -37,7 +37,7 @@ Based on the character Agnes tachyon
 ## Evaluation
 Agnes uses stockfish style net based on the below architecture:
 - features HalfKAv2_hm^
-- --l1 512  --l2 16  --l3 32
+- --l1 1536  --l2 16  --l3 32
 - trained on nnue-pytorch pipeline on a cpu(ryzen 5825u) **,it was painful**
 
 ## Search
@@ -107,5 +107,5 @@ Release 2.0* can be 3400 elo
 See [LICENSE](LICENSE).
 
 ## Acknowledgement
-* Agnes has been inspired from many strong chess engines like stockfish, reckless, koivisto, patricia, and caissa.
+* Agnes has been inspired from many strong chess engines like Stockfish, Reckless, Koivisto, Patricia, and Caissa.
 * Agnes uses https://github.com/syzygy1/tb for syzygy tablebase
