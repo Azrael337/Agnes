@@ -1,7 +1,5 @@
-# Agnes Chess Engine
-
 <div align="center">
-  <img src="logo.jpg" alt="Agnes chess engine" width="300">
+  <img src="logo.png" alt="Agnes chess engine" width="300">
 
   ![License](https://img.shields.io/badge/License-GPL_3.0-green?style=for-the-badge)
   ![C++](https://img.shields.io/badge/C++-17-purple?style=for-the-badge)
@@ -10,11 +8,8 @@
   ![Random](https://img.shields.io/badge/Defeat_ME-🤍-red?style=for-the-badge)
 
 
-**A simple strong chess engine in C++ using a compact nnue and an efficient search**
-<br>
-Based on the character Agnes tachyon
-<br>
-<br> **⚠️ No guinea pigs were harmed during the making of this chess engine ⚠️**
+**A simple strong chess engine in C++ using a custom-trained nnue and an efficient search**
+<br> **Agnes — Holy in Name. Merciless on the Board** <br> _Agnes - meaning "Pure" and "Holy"_
 
 </div>
 
@@ -24,6 +19,9 @@ Based on the character Agnes tachyon
 
 - [Evaluation](#evaluation)
 - [Search](#search)
+- [Quiescence](#quiescence)
+- [Move Ordering](#move-ordering)
+- [Transposition table](#transposition-table)
 - [UCI Options](#uci-options)
 - [UCI Commands](#uci-commands)
 - [Building](#building)
@@ -35,19 +33,86 @@ Based on the character Agnes tachyon
 ---
 
 ## Evaluation
-Agnes uses stockfish style net based on the below architecture:
-- features HalfKAv2_hm^
-- --l1 1536  --l2 16  --l3 32
-- trained on nnue-pytorch pipeline on a cpu(ryzen 5825u) **,it was painful**
+**The network was trained using the nnue-pytorch training pipeline, with the training process running entirely on a Ryzen 7 5825U CPU (don't try this at home!)**
+<br>Training such a network on a CPU was a considerably lengthy process, but it allowed Agnes to have its own trained evaluation network rather than simply relying on an externally supplied network.
+
+**Network Architecture:**
+| Component                | Configuration   |
+| ------------------------ | --------------- |
+|`Feature Set`             | HalfKAv2_hm^    |
+|`Feature Transformer (L1)`|       1536      |
+|`Hidden Layer (L2)`       |        16       |
+|`Hidden Layer (L3)`       |        32       |
+|`Output Layer`            |        1        |
+|`PSQT Buckets`            |        8        |
+|`Layer Stacks`            |        8        |
+
+**Some Features:**
+- Agnes uses HalfKAv2_hm^, a king-relative feature representation that categorizes piece-square relationships according to the position of the king.
+- One of the important components of Agnes's evaluator is its incremental accumulator system.
+- King moves require refreshing the corresponding perspective because the king-relative feature representation changes.
+- In addition to the neural network's positional output, Agnes incorporates a separate Piece-Square Table (PSQT) contribution. The PSQT component uses eight material-dependent buckets, allowing positional contributions to vary according to the stage of the game.
+
+**Quantizaton:**
+
+For efficient inference, Agnes uses quantized network parameters:
+- INT8 weights for fully connected layers.
+- INT32 biases and accumulators where required.
+- Clipped activation functions and squared activations.
+- Bucket-specific network stacks.
+
+**The result is a custom NNUE evaluation system designed to provide Agnes with a strong positional understanding without sacrificing search efficiency**
 
 ## Search
-Nothing too fancy just negamax with fail-soft aplha-beta pruning and lots of pruning and move ordering identical to other top engines.
+- Fail-soft negamax with alpha-beta
+- Aspiration windows (from depth 5, dynamic widening)
+- Iterative deepening with IIR (internal iterative reduction)
+- Razoring (quadratic margin, depth-gated)
+- Reverse futility pruning (RFP) with improving & complexity terms
+- Null-move pruning (NMP) with verification search
+- ProbCut (with improving margin + depth reduction)
+- Late move pruning (LMP)
+- Futility pruning (quiet + capture, history-scaled)
+- SEE-based move pruning (quiet + capture, history-aware)
+- Singular extensions (with low-depth & deep-pct margins)
+- Double extensions (budget-capped along a line)
+- Check extensions (SEE-guarded, with check_bonus)
+- Late move reductions (LMR) — SF17-style formula
+- Bad-noisy futility at shallow depth
+- History-driven extension/reduction adjustments
+
+## Quiescence
+- Stand-pat with delta cap
+- Captures + queen promotions only (non-check)
+- Full move generation when in check
+- SEE-split of noisy moves (good vs bad)
+
+## Move Ordering
+- TT move first
+- Noisy moves (captures, EP, queen promos) with MVV-LVA + SEE
+- Killer moves (2 per ply)
+- Counter-moves
+- Quiet moves scored by threat-aware main history + piece-to history
+- Continuation history (plies 1, 2, 4, 6, weighted)
+- Pawn-structure-aware history
+- Capture history + capture continuation history
+- Threat-aware ordering: escape bonus / enter penalty by attacker class (pawn > minor > rook > queen hierarchy)
+- Check bonus for SEE-guarded quiet checks
+- Staged MovePicker with LAZY quiet generation (captures up front, quiets generated only when reached)
+
+## Transposition table
+- 4 entries × 16 B per 64 B cluster (one cache line)
+- mulhi64 indexing (any cluster count)
+- 5-bit generation, PV flag, int16 scores
+- MADV_HUGEPAGE on Linux, sry windows
+- hashfull per mil reporting
+
 
 ## UCI Options
 
 | Option      | Type   | Default | Range     | Description                                        |
 | ----------- | ------ | ------- | --------- | -------------------------------------------------- |
-| `EvalFile`  | string | —       | —         | Path to a custom NNUE evaluation file              |
+| `EvalFile`  | string | archerontia.nnue       | —         | Path to a custom NNUE evaluation file              |
 | `Hash`      | spin   | 256     | 1–65536   | Transposition table size in MB                     |
 | `Threads`   | spin   | 1       | 1–256     | Number of search threads (Lazy SMP)                |
 | `NNUEScale` | spin   | 40      | 1–400     | NNUE evaluation scaling factor                     |
@@ -63,7 +128,12 @@ Agnes is compatible with any UCI-capable chess GUI such as Cute Chess, Banksia, 
 cd /wherever/the/makefile/is
 
 make "bare avx2"
-make avx2/avx512/bmi2/vnni
+
+# Alternatively, choose a build target:
+make avx2
+make avx512
+make bmi2
+make vnni
 ```
 
 - avx2      => any CPU since ~2013
@@ -107,5 +177,10 @@ Release 2.0* can be 3400 elo
 See [LICENSE](LICENSE).
 
 ## Acknowledgement
-* Agnes has been inspired from many strong chess engines like Stockfish, Reckless, Koivisto, Patricia, and Caissa.
 * Agnes uses https://github.com/syzygy1/tb for syzygy tablebase
+* Agnes has been inspired from many strong chess engines like 
+- [Stockfish](https://github.com/official-stockfish/Stockfish)
+- [Reckless](https://github.com/codedeliveryservice/Reckless)
+- [Koivisto](https://github.com/Luecx/Koivisto)
+- [Patricia](https://github.com/Adam-Kulju/Patricia)
+- [Caissa](https://github.com/Witek902/Caissa)
