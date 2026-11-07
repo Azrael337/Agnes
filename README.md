@@ -8,7 +8,7 @@
   ![Random](https://img.shields.io/badge/Defeat_ME-🤍-red?style=for-the-badge)
 
 
-**A simple strong chess engine in C++ using a custom-trained nnue and an efficient search**
+**A simple strong chess engine in C++ using a NNUE trained on cpu and an efficient search**
 <br> **Agnes — Holy in Name. Merciless on the Board** <br> _Agnes - meaning "Pure" and "Holy"_
 
 </div>
