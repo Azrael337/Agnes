@@ -40,13 +40,13 @@ namespace nnue {
 //  here know more: https://chessprogramming.org/NNUE
 //=========x=========x=========x=========x=========x=========x=========x=========
 #ifndef NNUE_ARCH_L1
-#define NNUE_ARCH_L1 512
+#define NNUE_ARCH_L1 1536 // Feature Transformer (L1)
 #endif
 #ifndef NNUE_ARCH_L2
-#define NNUE_ARCH_L2 16
+#define NNUE_ARCH_L2 16   // Hidden Layer (L2)
 #endif
 #ifndef NNUE_ARCH_L3
-#define NNUE_ARCH_L3 32
+#define NNUE_ARCH_L3 32   // Hidden Layer (L3)
 #endif
 constexpr int L1 = NNUE_ARCH_L1;
 constexpr int L2 = NNUE_ARCH_L2;
