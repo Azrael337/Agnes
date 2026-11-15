@@ -9,7 +9,7 @@
       <img src="https://img.shields.io/badge/License-GPLv3-blue?style=for-the-badge&labelColor=1a1a1a" alt="License" />
     </a>
     <br>
-    <a href="https://youtu.be/ADKpTHKYVe0?si=BUfWgh6Lvx3_kPFp">
+    <a href="https://youtu.be/TNqw1ayK56Y?si=y8lxNvA7Ogja-xhP">
       <img src="https://img.shields.io/badge/Defeat_Me-🤍-red?style=for-the-badge&labelColor=1a1a1a" alt="Defeat Me" />
     </a>
   </p>
@@ -47,9 +47,14 @@ A compact HalfKAv2_hm^ NNUE network — **Acherontia**, shipped as `acherontia.n
 
 | Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `Hash` | Spin | `64` | Transposition table size in MB |
-| `Threads` | Spin | `1` | Number of search threads (Lazy SMP) |
-| `EvalFile` | String | `88mm.nnue` | Path to the NNUE network weights file |
+| `Hash` | Spin | `256` | Transposition table size in MB (max-65536) |
+| `Threads` | Spin | `1` | Number of search threads (Lazy SMP max-256)|
+| `EvalFile` | String | `acherontia.nnue` | Path to the NNUE network weights file |
+|`Move Overhead`|Spin|`10`|min-1 max-100|
+|`NNUEScale`|Spin|`40`|min-1 max-400|
+|`Clear Hash`|Button|`-`|Clears Hash|
+|`SyzygyPath`|String|`<empty>`|Allocate the Syzgy table path|
+|`UCI_Chess960`|Check|`false`|Chess960 enable/disable|
 
 ## Releases
 
@@ -65,7 +70,7 @@ To build from a released source, unzip it and run:
 make
 ```
 
-Place `88mm.nnue` next to the binary (or point `EvalFile` at it) and you're ready to go.
+Place `acherontia.nnue` next to the binary (or point `EvalFile` at it) and you're ready to go.
 
 ## Acknowledgements
 
